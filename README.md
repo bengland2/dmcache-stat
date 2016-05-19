@@ -32,4 +32,25 @@ volume, converting counters into integer fields within this sample object
  * previous_sample - instance of this class
  * time_difference - floating-point seconds
 
+# statistic definitions
+
+* mdblk-rate - rate in blocks/sec at which metadata device blocks 
+are being consumed (freed if negative)
+* used-cblk-rate - rate in blocks/sec at which fast device blocks are being
+  consumed (or freed if negative)
+* rd-hit-rate - rate in hits/sec at which dm-cache is getting cache hits for
+  this volume
+* wr-hit-rate - rate in hits/sec at which dm-cache is getting cache hits for
+  this volume
+* demote-rate - rate in blocks/sec at which dm-cache is demoting blocks from
+  fast to slow device
+* promote-rate - rate in blocks/sec at which dm-cache is promoting blocks from
+  slow to fast device
+* dirty-rate - rate in blocks/sec at which dm-cache is adding/removing dirty
+  blocks
+* rd-efficiency - fraction of block read accesses that result in cache hits 
+(0.0 to 1.0)
+* wr-efficiency - fraction of block write accesses that result in cache hits
+(0.0 to 1.0)
+
 
