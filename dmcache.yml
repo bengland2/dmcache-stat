@@ -1,0 +1,168 @@
+---
+
+# ansible script to deploy OSD filesystems on top of dm-cache
+# each LVM cache volume will be named /dev/vg_ceph/lv_xxx where xxx is the device name
+# assumes that all partitions have been precreated on the fast device (SSD)
+# because RHEL doesn't like to tear down partitions
+
+- name: deploy OSD filesystems on top of LVM cache volumes
+  hosts:
+  - osds
+
+  vars:
+  # units for partition and LV sizes should be in MB
+  - slowdev_size: 990000
+  - fastdev_size: 800000
+  # assumption: only one partition per slow device
+  # we wouldn't even use a partition to pvcreate 
+  # except that LVM seems to require it now
+  # assumption: only one fast device per host right now
+  - fastdev: /dev/nvme0n1
+  # for device names ending in a digit, partitions have a prefix "p", 
+  # for device names ending in a letter  they do not
+  - partprefix: p
+  # sizes are in GB
+  - ssd_journal_size: 3000
+  - fs_journal_size: 1000
+  - metalv_size: 1000
+
+  tasks:
+  - name: calculate partition and LV sizes
+    local_action: "shell python calc_part_sizes.py {{fastdev_size}} {{hdd_devices|length}} {{ssd_journal_size}} {{fs_journal_size}} {{metalv_size}}"
+    register: part_sizes
+
+  - set_fact: >
+      total_per_osd_fast_size={{part_sizes.stdout_lines[0]}}
+      fastlv_size={{part_sizes.stdout_lines[1]}}
+
+  - name: identify partitions to use for fast devices
+    #shell: "ls {{fastdev}}p[0-9]* || ls {{fastdev}}[0-9]*"
+    shell: "for n in `seq 1 {{hdd_devices|length}}` ; do echo {{fastdev}}{{partprefix}}$n ; done"
+    register: fastdev_parts
+
+  - name: check that lists are the same length
+    shell: "echo {{fastdev_parts.stdout_lines}} {{hdd_devices}}"
+    failed_when: "{{fastdev_parts.stdout_lines|length}} != {{hdd_devices|length}}"
+
+  - name: find old OSD filesystems
+    shell: "grep /var/lib/ceph/osd /proc/mounts | awk '{print $2}'"
+    register: old_osd_filesystems
+
+  - name: tear down old OSD filesystems
+    shell: "umount -v {{item}}"
+    with_items: "{{old_osd_filesystems.stdout_lines}}"
+
+  - name: kill all LVM commands that may have been hung
+    shell: "killall -q lvcreate pvcreate vgcreate lvconvert || echo -n"
+    failed_when: false
+
+  - name: identify LVM cache VGs
+    shell: "vgscan | grep vg_ceph_osd | awk '/Found/ { print $4 }' | tr '\"' ' '"
+    register: old_lvm_cache_vgs
+
+  - name: tear down LVM cache volumes
+    shell: "echo y | lvremove -f /dev/{{item}}/cachelv ; echo y | lvremove -f /dev/{{item}}/fast ; echo -y | lvremove -f /dev/{{item}}/metadata ; echo"
+    with_items: "{{old_lvm_cache_vgs.stdout_lines}}"
+
+  - name: tear down VG
+    shell: "vgremove -f {{item}}"
+    with_items: "{{old_lvm_cache_vgs.stdout_lines}}"
+
+  - name: tear down slow PV
+    shell: "pvdisplay {{item}}1 ; if [ $? == 0 ] ; then  pvremove {{item}}1 ; fi "
+    with_items: "{{hdd_devices}}"
+
+  - name: tear down fast PV
+    shell: "pvdisplay {{item}} ; if [ $? == 0 ] ; then  pvremove {{item}} ; fi "
+    with_items: "{{fastdev_parts.stdout_lines}}"
+
+  - name: wait a sec
+    shell: sleep 1
+
+  - name: tear down slow partitions
+    shell: "if [ -e {{item}}1 ] ; then parted -s {{item}} rm 1 ; fi"
+    with_items: "{{hdd_devices}}"
+    
+  - name: tear down fast partitions
+    shell: "if [ -e {{item}} ] ; then parted -s {{fastdev}} rm `echo {{item}} | sed s,{{fastdev}}{{partprefix}},,` ; fi"
+    with_items: "{{fastdev_parts.stdout_lines}}"
+
+  - name: make fast device partition table
+    shell: "parted -s {{fastdev}} mktable gpt && partprobe {{fastdev}}"
+
+  - name: exit
+    shell: exit 1
+    when: teardown is defined
+
+  #- name: remove any LVM locks for ceph
+  #  shell: "rm -fv /run/lock/lvm/V_vg_ceph_osds*"
+
+  - name: create slow partitions
+    shell: "parted -a optimal -s {{item}} mkpart primary 1m {{slowdev_size}}M"
+    with_items: "{{hdd_devices}}"
+
+  - name: create fast partitions
+    script: "mkpart.sh {{fastdev}} {{hdd_devices|length}} {{total_per_osd_fast_size}} {{ssd_journal_size}}"
+
+  - name: add slow device as LVM PV
+    shell: "sleep 1 ; pvcreate -ff {{item}}1"
+    with_items: "{{hdd_devices}}"
+
+  - name: add fast partition as LVM PV
+    shell: "sleep 1 ; pvcreate -ff {{item}}"
+    with_items: "{{fastdev_parts.stdout_lines}}"
+
+  - name: create Ceph VG
+    shell: "sleep 1 ; vgcreate vg_ceph_osds_`basename {{item}}` {{item}}1"
+    with_items: "{{hdd_devices}}"
+
+  - name: extend Ceph VG to include fast partition
+    shell: "sleep 1 ; vgextend vg_ceph_osds_`basename {{item.0}}` {{item.1}}"
+    with_together:
+    - "{{hdd_devices}}"
+    - "{{fastdev_parts.stdout_lines}}"
+
+  - name: create slow LV
+    shell: "(( slowlv_size={{slowdev_size}} - 50000 )) ; echo y | lvcreate --name cachelv --size ${slowlv_size}M vg_ceph_osds_`basename {{item}}` {{item}}1"
+    with_items: "{{hdd_devices}}"
+
+  - name: create fast, metadata, fs_journal
+    shell: "vgnm=vg_ceph_osds_`basename {{item.0}}` ; (echo y | lvcreate --name metadata --size {{metalv_size}}M $vgnm {{item.1}}) && (echo y | lvcreate --name fast --size {{fastlv_size}}M $vgnm {{item.1}}) && (echo y | lvcreate --name fs_journal --size {{fs_journal_size}}M $vgnm {{item.1}})"
+    with_together:
+    - "{{hdd_devices}}"
+    - "{{fastdev_parts.stdout_lines}}"
+
+  - name: create a cache pool
+    shell: "vgnm=vg_ceph_osds_`basename {{item.0}}` ; echo y | lvconvert --type cache-pool --poolmetadata $vgnm/metadata $vgnm/fast"
+    with_together:
+    - "{{hdd_devices}}"
+    - "{{fastdev_parts.stdout_lines}}"
+
+  - name: create LVM cache volume
+    shell: "vgnm=vg_ceph_osds_`basename {{item.0}}` ; echo y | lvconvert --type cache --cachepool $vgnm/fast --cachemode writeback $vgnm/cachelv"
+    with_together:
+    - "{{hdd_devices}}"
+    - "{{fastdev_parts.stdout_lines}}"
+    # this when clause is just so we can do control experiments to measure
+    # effect of LVM cache
+    when: not (skip_lvconvert is defined)
+
+  - name: make a filesystem
+    #shell: "vgnm=vg_ceph_osds_`basename {{item}}` ; mkfs.xfs -f -i size=1024 -l logdev=/dev/$vgnm/fs_journal,size={{fs_journal_size}}g /dev/vg_ceph_osds_`basename {{item}}`/cachelv"
+    shell: "vgnm=vg_ceph_osds_`basename {{item}}` ; mkfs.xfs -f -i size=1024 -l logdev=/dev/$vgnm/fs_journal /dev/vg_ceph_osds_`basename {{item}}`/cachelv"
+    # if you want no separate XFS journal, uncomment this
+    #shell: "vgnm=vg_ceph_osds_`basename {{item}}` ; mkfs.xfs -i size=1024 /dev/vg_ceph_osds_`basename {{item}}`/cachelv"
+    with_items: "{{hdd_devices}}"
+
+  - name: mount filesystem
+    shell: "vgnm=vg_ceph_osds_`basename {{item}}` ; mtpt=/var/lib/ceph/osd/`basename {{item}}` ; mkdir -pv $mtpt && mount -t xfs -o noatime,logdev=/dev/$vgnm/fs_journal /dev/$vgnm/cachelv $mtpt"
+    # if you want no separate XFS journal, uncomment this
+    #shell: "vgnm=vg_ceph_osds_`basename {{item}}` ; mtpt=/var/lib/ceph/osd/`basename {{item}}` ; mkdir -pv $mtpt && mount -t xfs -o noatime /dev/$vgnm/cachelv $mtpt"
+    with_items:
+    - "{{hdd_devices}}"
+
+  # need to do this for small object/file workloads with ceph filestore
+  - name: increase number of inodes allowed
+    shell: "xfs_growfs -m 50 {{item}}"
+    with_items: "{{devices}}"
+

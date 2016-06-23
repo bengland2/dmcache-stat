@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<workload name="read_100con__OBJS_PER_CONTAINER_obj__OBJ_SIZE_KB__WORKERS_w" description="read" config="">
+    <auth type="swauth" config="username=testuser:swift;password=foobar;url=http://gprfc073-10ge:8080/auth/v1.0;retry=9"/>
+    <storage type="swift" config="timeout=300000"/>
+    <workflow config="">
+        <workstage name="init" closuredelay="0" config="">
+            <auth type="swauth" config="username=testuser:swift;password=foobar;url=http://gprfc073-10ge:8080/auth/v1.0;retry=9"/>
+            <storage type="swift" config="timeout=300000"/>
+            <work name="init" type="init" workers="_WORKERS_" interval="5"
+                division="container" runtime="0" rampup="0" rampdown="0"
+                afr="0" totalOps="_WORKERS_" totalBytes="0" config="containers=r(1,100);cprefix=_OBJ_SIZE_KB-read">
+                <auth type="swauth" config="username=testuser:swift;password=foobar;url=http://gprfc073-10ge:8080/auth/v1.0;retry=9"/>
+                <storage type="swift" config="timeout=300000"/>
+                <operation type="init" ratio="100" division="container"
+                    config="containers=r(1,100);cprefix=_OBJ_SIZE_KB-read" id="op1"/>
+            </work>
+        </workstage>
+        <workstage name="read" closuredelay="0" config="">
+            <auth type="swauth" config="username=testuser:swift;password=foobar;url=http://localhost:8080/auth/v1.0;retry=9"/>
+            <storage type="swift" config="timeout=300000"/>
+            <work name="read" type="normal" workers="_WORKERS_"
+                interval="5" division="object" runtime="0" rampup="0"
+                rampdown="0" afr="0" totalOps="_TOTAL_OBJS_" totalBytes="0" config="containers=u(1,100);objects=u(1,_OBJS_PER_CONTAINER_);cprefix=_OBJ_SIZE_KB-read;sizes=c(_OBJ_SIZE_)KB">
+                <auth type="swauth" config="username=testuser:swift;password=foobar;url=http://localhost:8080/auth/v1.0;retry=9"/>
+                <storage type="swift" config="timeout=300000"/>
+                <operation type="read" ratio="100" division="object"
+                    config="containers=u(1,100);objects=u(1,_OBJS_PER_CONTAINER_);cprefix=_OBJ_SIZE_KB-read;sizes=c(_OBJ_SIZE_)KB" id="op1"/>
+            </work>
+        </workstage>
+    </workflow>
+</workload>

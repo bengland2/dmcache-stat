@@ -1,0 +1,11 @@
+---
+
+- name: trim SSD storage
+  hosts: osds
+  serial: 1
+  tasks:
+    - name: partition OSDS across NUMA sockets
+      script: ../numa-partition-osds.sh
+
+    - name: trim
+      script: trim.sh
