@@ -1,0 +1,36 @@
+cluster:
+  use_existing: True
+  user: 'root'
+  head: "ceph-cbt"
+  clients: ["gprfc073-10ge", "gprfc074-10ge", "gprfc075-10ge", "gprfc076-10ge",]
+  osds: []
+  mons: 
+    cephmon2-10ge:
+      a: "172.240.1.1:6789"
+  rgws: ["gprfc073-10ge", "gprfc074-10ge", "gprfc075-10ge", "gprfc076-10ge",]
+  #osds_per_node: 12
+  #fs: 'xfs'
+  conf_file: '/etc/ceph/ceph.conf'
+  iterations: 1
+  clusterid: "ceph"
+  tmp_dir: "/tmp/cbt"
+benchmarks:
+   cosbench:
+     obj_size: [64KB]
+     osd_ra: [4096]
+     workers: 64
+     containers_max: 100
+     objects_max: 100000
+     mode: ["read"]
+     cosbench_dir: '/root/cosbench/0.4.2.c3'
+     cosbench_xml_dir: '/root/cosbench/0.4.2.c3/conf'
+     controller: "ceph-cbt"
+     auth:
+      config: username=testuser:swift;password=foobar;url=http://gprfc073-10ge:8080/auth/v1.0;retry=9
+     template: [default]
+     rampup: 20
+     runtime: 60
+     rampdown: 10
+     containers: ["r(1,100)"]
+     objects: ["r(1,10000)"]
+     ratio: [100]
