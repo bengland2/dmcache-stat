@@ -15,19 +15,19 @@ To use these files, do:
 Then copy these files into the top-level directory of the
 ceph-ansible tree:
 
-o trim.yml - ansible script to invoke trim.sh on OSDs
-o trim.sh - shell script to run fstrim on all OSD filesystems
-o dmcache.yml - ansible script for dm-cache-backed OSD directory mountpoints
-o trim.sh - shell script to trim all OSDs on host
-o mkpart.sh - script to construct partitions needed by dm-cache and Ceph
-o calc-part-sizes.py - compute partition and LV sizes needed by Ceph + dm-cache
+* trim.yml - ansible script to invoke trim.sh on OSDs
+* trim.sh - shell script to run fstrim on all OSD filesystems
+* dmcache.yml - ansible script for dm-cache-backed OSD directory mountpoints
+* trim.sh - shell script to trim all OSDs on host
+* mkpart.sh - script to construct partitions needed by dm-cache and Ceph
+* calc-part-sizes.py - compute partition and LV sizes needed by Ceph + dm-cache
 
 And copy these files into $HOME:
 
-o run-test.sh - run an entire RGW Swift create or read workload
-o setup-rados-for-test.sh - reset RGW Swift environment
-o start-test.sh - start COSBench load running
-o wait-for-done.sh - wait until COSBench load is done
-o workload-config-prepare.xml - COSBench object create workload template
-o workload-config-read.xml - COSBench object read workload template
-o numa-partition-osds.sh - script to pin OSD processes to CPU sockets
+* run-test.sh - run an entire RGW Swift create or read workload
+* setup-rados-for-test.sh - reset RGW Swift environment
+* start-test.sh - start COSBench load running
+* wait-for-done.sh - wait until COSBench load is done
+* workload-config-prepare.xml - COSBench object create workload template
+* workload-config-read.xml - COSBench object read workload template
+* numa-partition-osds.sh - script to pin OSD processes to CPU sockets
