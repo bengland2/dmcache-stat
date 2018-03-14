@@ -1,22 +1,27 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 # dmcache_stat.py - script to compute useful statistics from 
 # dmsetup status counters for dmcache volumes
 # to run:
+#
 #   python dmcache_stat.py 2 3
+#
 # this will generate 3 samples of stats.  Each round of stats will have
 # a 2-second measurement interval
 # or use it as a class to parse log files that already exist.
 #
-# This script outputs in .csv format so that data can be directly loaded
-# into a spreadsheet.  It could easily output in JSON format as well 
-# if this would be useful.
+# This script by default outputs in .csv format so that data can be directly loaded
+# into a spreadsheet.  To make it use JSON format, use environment variable
+# JSON_OUTPUT=anything . for example:
+#
+#  JSON_OUTPUT=1 python dmcache_stat.py 2 3
 #
 
 import subprocess
 import time
 import sys
 import os
+import json
 
 SECTORS_PER_KB = 2
 KB_PER_GiB = 1024 * 1024
@@ -115,6 +120,22 @@ class dmcache_vol_sample:
                d.demotion_rate, d.promotion_rate, d.dirty_rate,
                d.rd_efficiency, d.wr_efficiency)
 
+    # convert stats sample to a python dictionary, which json module accepts
+
+    def stats2json(self):
+        s = {}
+        s['id']                = self.id
+        s['mdblk_rate']        = str(self.mdblk_rate)
+        s['used_cblk_rate']    = str(self.used_cblk_rate)
+        s['rd_hit_rate']       = str(self.rd_hit_rate)
+        s['wr_hit_rate']       = str(self.wr_hit_rate)
+        s['demotion_rate']     = str(self.demotion_rate)
+        s['promotion_rate']    = str(self.promotion_rate)
+        s['dirty_rate']        = str(self.dirty_rate)
+        s['rd_efficiency']     = str(self.rd_efficiency)
+        s['wr_efficiency']     = str(self.wr_efficiency)
+        return s
+
     # convert token of form "a/b" to a 2-tuple of numbers
 
     def split_pair(self, pair_token):
@@ -143,6 +164,7 @@ class dmcache_vol_sample:
         self.policy = tkns[20]
 
         # parse the counters for this volume
+        # FIXME: we probably need to take into account the dm-cache version
 
         self.md_blksz = int(tkns[4])
         (self.used_mdblks, self.total_mdblks) = self.split_pair(tkns[5])
@@ -189,31 +211,59 @@ def usage(msg):
     print('usage: dmcache-stat.py poll-interval-seconds poll-count')
     sys.exit(1)
 
+space_record = '                                                                        '
+
+def indent(spaces, json_str):
+    lines = [ space_record[:spaces] + l for l in json_str.split('\n') ]
+    return '\n'.join(lines)
+
 if __name__ == '__main__':
     if len(sys.argv) < 3: usage('not enough command line parameters')
     poll_interval = float(sys.argv[1])
     poll_count = int(sys.argv[2])
-
-    print('volname, size(GiB), policy, mode')
+    use_json = os.getenv('OUTPUT_JSON')
     s2 = poll_dmcache()
-    for v in s2:
+    if not use_json:
+      print('volname, size(GiB), policy, mode')
+      for v in s2:
         print('%s, %9.3f, %s, %s' % (
             v.id, v.volsize, v.mode, v.policy))
-    print('')
-
-    base_time = time.time()
-    for p in range(0, poll_count):
+      print('')
+      base_time = time.time()
+      for p in range(0, poll_count):
         time.sleep(poll_interval)
         s1 = s2
         s2 = poll_dmcache()
-        # compute stats for this interval
-        if os.getenv('DEBUG'):
-            for v in s2: 
-                print time.time(), v
         print('time, devname, mdblk-rate, used-cblk-rate, rd-hit-rate, wr-hit-rate, demote-rate, promote-rate, dirty-rate, rd-efficiency, wr-efficiency')
         for j in range(0, len(s2)): 
             s2[j].compute_rates(s1[j], poll_interval)
             delta_time = time.time() - base_time
             print('%f, %s' % (delta_time, s2[j].stats2csv()))
         print('')
-
+    else:
+      vols_info = {}
+      for v in s2:
+          vol = {}
+          vol['sizeGB'] = v.volsize
+          vol['mode'] = v.mode
+          vol['policy'] = v.policy
+          vols_info[v.id] = vol
+      base_time = time.time()
+      print('{')
+      print('  "vol_info": ' + indent(4, json.dumps(vols_info, indent=4)))
+      print(', "vol_samples": [')
+      vol_samples = {}
+      for p in range(0, poll_count):
+          time.sleep(poll_interval)
+          s1 = s2
+          s2 = poll_dmcache()
+          for j in range(0, len(s2)):
+              s2[j].compute_rates(s1[j], poll_interval)
+              delta_time = time.time() - base_time
+              sep = ''
+              if p < poll_count-1:
+                  sep = ','
+              print(indent(8, json.dumps(s2[j].stats2json(), indent=4)) + sep)
+              sys.stdout.flush()
+      print('  ]')
+      print('}')
